@@ -1,0 +1,41 @@
+deployment:
+  country: India
+  default_timezone: Asia/Kolkata
+  languages:
+    - en
+    - hi
+    - bn
+    - ta
+    - te
+
+thresholds:
+  acute_watery_diarrhea:
+    poisson_lambda: 5
+    cusum_k: 0.5
+    cusum_h: 5.0
+  acute_febrile_illness:
+    poisson_lambda: 8
+    cusum_k: 0.5
+    cusum_h: 5.0
+  acute_respiratory_infection:
+    poisson_lambda: 12
+    cusum_k: 0.6
+    cusum_h: 6.0
+  acute_rash_with_fever:
+    poisson_lambda: 3
+    cusum_k: 0.4
+    cusum_h: 4.0
+  acute_neurological_syndrome:
+    poisson_lambda: 2
+    cusum_k: 0.3
+    cusum_h: 3.5
+
+escalation:
+  district_alert_score_threshold: 0.65
+  state_alert_score_threshold: 0.8
+  evidence_window_days: 7
+
+integration:
+  idsp_enabled: true
+  ihip_sync_enabled: true
+  fhir_export_enabled: true

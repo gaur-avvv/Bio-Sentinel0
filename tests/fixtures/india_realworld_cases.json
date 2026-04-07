@@ -1,0 +1,38 @@
+[
+  {
+    "text": "Patient ko bukhar aur khansi hai 3 din se",
+    "state": "Uttar Pradesh",
+    "district": "Lucknow",
+    "expected_syndrome": "acute_respiratory_infection"
+  },
+  {
+    "text": "Watery diarrhea and vomiting for 2 days",
+    "state": "Bihar",
+    "district": "Patna",
+    "expected_syndrome": "acute_watery_diarrhea"
+  },
+  {
+    "text": "High fever with red rash spots for 4 days",
+    "state": "Maharashtra",
+    "district": "Nagpur",
+    "expected_syndrome": "acute_rash_with_fever"
+  },
+  {
+    "text": "Confusion and seizure episodes since 1 day",
+    "state": "Karnataka",
+    "district": "Mysuru",
+    "expected_syndrome": "acute_neurological_syndrome"
+  },
+  {
+    "text": "Saans lene mein dikkat, khansi and fever for 2 days",
+    "state": "Delhi",
+    "district": "New Delhi",
+    "expected_syndrome": "acute_respiratory_infection"
+  },
+  {
+    "text": "Loose motion with dehydration for 3 din",
+    "state": "West Bengal",
+    "district": "Kolkata",
+    "expected_syndrome": "acute_watery_diarrhea"
+  }
+]

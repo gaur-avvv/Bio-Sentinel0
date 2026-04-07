@@ -1,0 +1,26 @@
+models:
+  intake_text_model:
+    name: medgemma-4b-it
+    quantization: q4
+    device: edge
+  surveillance_reasoning_model:
+    name: medgemma-27b-it
+    quantization: q4_k_m
+    device: regional
+  medasr:
+    name: medasr-clinical
+    device: edge
+  medsiglip:
+    name: medsiglip-medical
+    device: edge
+
+inference:
+  max_tokens: 512
+  temperature: 0.1
+  top_p: 0.9
+  timeout_seconds: 20
+
+sync:
+  mode: optional
+  retry_interval_seconds: 300
+  batch_size: 100

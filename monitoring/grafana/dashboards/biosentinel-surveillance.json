@@ -1,0 +1,56 @@
+{
+  "title": "Bio Sentinel - Surveillance Operations",
+  "schemaVersion": 39,
+  "version": 1,
+  "panels": [
+    {
+      "title": "HTTP Requests by Endpoint",
+      "type": "timeseries",
+      "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
+      "targets": [
+        {
+          "expr": "sum by (endpoint) (rate(biosentinel_http_requests_total[5m]))",
+          "legendFormat": "{{endpoint}}"
+        }
+      ]
+    },
+    {
+      "title": "Agent Execution p95",
+      "type": "timeseries",
+      "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (agent, tool, le) (rate(biosentinel_agent_execution_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{agent}}/{{tool}}"
+        }
+      ]
+    },
+    {
+      "title": "Offline Queue Size",
+      "type": "stat",
+      "gridPos": {"x": 0, "y": 8, "w": 6, "h": 6},
+      "targets": [
+        {
+          "expr": "biosentinel_integration_queue_size",
+          "legendFormat": "{{integration}}"
+        }
+      ]
+    },
+    {
+      "title": "Inference Request Rate",
+      "type": "timeseries",
+      "gridPos": {"x": 6, "y": 8, "w": 18, "h": 6},
+      "targets": [
+        {
+          "expr": "sum by (model, backend, status) (rate(biosentinel_inference_requests_total[5m]))",
+          "legendFormat": "{{model}}/{{backend}} {{status}}"
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  }
+}
