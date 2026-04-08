@@ -222,6 +222,147 @@ Default endpoint checks:
 streamlit run streamlit_app.py --server.port ${PORT:-8501} --server.address 0.0.0.0
 ```
 
+## Frontend Integration Section (Web App)
+
+Use this section name in your frontend navigation:
+
+- `Surveillance Integration Hub`
+
+Recommended frontend page blocks:
+
+1. `Case Intake Panel` (single case submit)
+2. `Batch Intake Panel` (multiple case submit)
+3. `Records Explorer` (filter by state/district/syndrome)
+4. `Alerts Feed` (monitor/district/state alerts)
+5. `Overview Stats` (counts and top syndromes)
+
+Frontend environment configuration:
+
+- `VITE_API_BASE_URL=https://<your-api-domain>`
+
+Example:
+
+```bash
+VITE_API_BASE_URL=https://bio-sentinel-api.up.railway.app
+```
+
+Suggested API client (`src/lib/biosentinelApi.ts`):
+
+```ts
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+
+type IngestRequest = {
+  text: string;
+  state: string;
+  district: string;
+};
+
+type BatchIngestRequest = {
+  events: IngestRequest[];
+};
+
+async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers || {}),
+    },
+    ...init,
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => ({}));
+    throw new Error(errorBody?.error?.message || `API error: ${response.status}`);
+  }
+
+  return response.json() as Promise<T>;
+}
+
+export const biosentinelApi = {
+  health: () => apiFetch<{ status: string; service: string }>("/health"),
+
+  ingestCase: (payload: IngestRequest) =>
+    apiFetch("/pipeline/ingest", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  ingestBatch: (payload: BatchIngestRequest) =>
+    apiFetch("/pipeline/ingest-batch", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  listRecords: (params?: {
+    limit?: number;
+    offset?: number;
+    state?: string;
+    district?: string;
+    syndrome?: string;
+  }) => {
+    const query = new URLSearchParams(
+      Object.entries(params || {}).reduce((acc, [k, v]) => {
+        if (v !== undefined && v !== null && v !== "") acc[k] = String(v);
+        return acc;
+      }, {} as Record<string, string>)
+    ).toString();
+    return apiFetch(`/records${query ? `?${query}` : ""}`);
+  },
+
+  getRecord: (recordId: string) => apiFetch(`/records/${recordId}`),
+
+  listAlerts: (params?: { limit?: number; offset?: number; severity?: string }) => {
+    const query = new URLSearchParams(
+      Object.entries(params || {}).reduce((acc, [k, v]) => {
+        if (v !== undefined && v !== null && v !== "") acc[k] = String(v);
+        return acc;
+      }, {} as Record<string, string>)
+    ).toString();
+    return apiFetch(`/alerts${query ? `?${query}` : ""}`);
+  },
+
+  overviewStats: () => apiFetch("/stats/overview"),
+};
+```
+
+Frontend route suggestion:
+
+- `/surveillance-integration`
+
+Minimal route component structure:
+
+```tsx
+export function SurveillanceIntegrationPage() {
+  return (
+    <main>
+      <h1>Surveillance Integration Hub</h1>
+      <section>{/* Case Intake Panel */}</section>
+      <section>{/* Batch Intake Panel */}</section>
+      <section>{/* Overview Stats */}</section>
+      <section>{/* Alerts Feed */}</section>
+      <section>{/* Records Explorer */}</section>
+    </main>
+  );
+}
+```
+
+Endpoint-to-UI mapping:
+
+- `POST /pipeline/ingest` -> Case Intake Panel
+- `POST /pipeline/ingest-batch` -> Batch Intake Panel
+- `GET /stats/overview` -> Overview Stats
+- `GET /alerts` -> Alerts Feed
+- `GET /records` -> Records Explorer
+- `GET /records/{record_id}` -> Record details drawer/modal
+
+Integration checklist:
+
+1. Set `VITE_API_BASE_URL` in frontend environment.
+2. Add your frontend origin to `CORS_ALLOW_ORIGINS` in API deployment.
+3. Build one shared API client module (avoid scattered fetch logic).
+4. Surface `X-Request-ID` from API responses in error UI/logging.
+5. Add loading, empty, and retry states for each panel.
+
 ## Make Commands
 
 ```bash
