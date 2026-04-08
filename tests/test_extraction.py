@@ -99,3 +99,45 @@ def test_batch_ingest_endpoint() -> None:
     payload = response.json()
     assert payload["summary"]["total_records"] == 2
     assert isinstance(payload["summary"]["anomaly_details"], dict)
+
+
+def test_records_alerts_and_stats_endpoints() -> None:
+    ingest_response = client.post(
+        "/pipeline/ingest",
+        json={
+            "text": "Fever with cough and breathing difficulty for 2 days",
+            "state": "Maharashtra",
+            "district": "Pune",
+        },
+    )
+    assert ingest_response.status_code == 200
+    ingest_payload = ingest_response.json()
+    record_id = ingest_payload["record"]["record_id"]
+    alert_id = ingest_payload["alert"]["alert_id"]
+
+    records_response = client.get("/records", params={"state": "Maharashtra", "limit": 20})
+    assert records_response.status_code == 200
+    records_payload = records_response.json()
+    assert records_payload["count"] >= 1
+    assert any(record.get("record_id") == record_id for record in records_payload["records"])
+
+    record_response = client.get(f"/records/{record_id}")
+    assert record_response.status_code == 200
+    assert record_response.json()["record_id"] == record_id
+
+    alerts_response = client.get("/alerts", params={"limit": 20})
+    assert alerts_response.status_code == 200
+    alerts_payload = alerts_response.json()
+    assert alerts_payload["count"] >= 1
+    assert any(alert.get("alert_id") == alert_id for alert in alerts_payload["alerts"])
+
+    stats_response = client.get("/stats/overview")
+    assert stats_response.status_code == 200
+    stats_payload = stats_response.json()
+    assert "total_records" in stats_payload
+    assert "total_alerts" in stats_payload
+
+
+def test_get_record_not_found() -> None:
+    response = client.get("/records/rec_non_existent")
+    assert response.status_code == 404

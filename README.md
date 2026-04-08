@@ -209,6 +209,10 @@ python -m src.api.app
 Default endpoint checks:
 
 - GET /health
+- GET /records
+- GET /records/{record_id}
+- GET /alerts
+- GET /stats/overview
 - POST /pipeline/ingest
 - POST /pipeline/ingest-batch
 
@@ -251,6 +255,11 @@ python -m pytest -q tests/test_offline_sync.py
 ```
 
 ## Configuration
+
+Environment variables:
+
+- `SURVEILLANCE_DB_PATH` (default: `data/surveillance.db`) for persistent encounter/alert storage
+- `CORS_ALLOW_ORIGINS` for web client access control
 
 ### configs/model_config.yaml
 

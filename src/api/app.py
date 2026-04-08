@@ -5,6 +5,7 @@ import time
 import uuid
 
 from fastapi import FastAPI
+from fastapi import HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.requests import Request
@@ -16,6 +17,7 @@ from pydantic import BaseModel
 from src.agents.alert_agent import AlertAgent
 from src.agents.intake_agent import IntakeAgent
 from src.agents.surveillance_agent import SurveillanceAgent
+from src.data.surveillance_store import SurveillanceStore
 from src.observability.metrics.custom_metrics import (
     ALERTS_GENERATED,
     ENCOUNTERS_BY_SYNDROME,
@@ -45,6 +47,7 @@ app.add_middleware(
 intake_agent = IntakeAgent()
 surveillance_agent = SurveillanceAgent()
 alert_agent = AlertAgent()
+surveillance_store = SurveillanceStore(db_path=os.getenv("SURVEILLANCE_DB_PATH", "data/surveillance.db"))
 
 
 class IngestRequest(BaseModel):
@@ -115,7 +118,16 @@ def root() -> dict:
     return {
         "name": "bio-sentinel-api",
         "status": "ok",
-        "endpoints": ["/health", "/pipeline/ingest", "/pipeline/ingest-batch", "/metrics"],
+        "endpoints": [
+            "/health",
+            "/metrics",
+            "/pipeline/ingest",
+            "/pipeline/ingest-batch",
+            "/records",
+            "/records/{record_id}",
+            "/alerts",
+            "/stats/overview",
+        ],
     }
 
 
@@ -139,13 +151,16 @@ def ingest(payload: IngestRequest) -> dict:
     ).inc()
     summary = surveillance_agent.summarize([record])
     alert = alert_agent.build_alert(summary)
+    record_id = surveillance_store.save_record(record)
+    alert_id = surveillance_store.save_alert(alert, source="single_ingest", linked_record_id=record_id)
+    alert["alert_id"] = alert_id
     ALERTS_GENERATED.labels(
         alert_type="single_ingest",
         severity=alert.get("severity", "monitor"),
         escalation_level=alert.get("severity", "monitor"),
     ).inc()
     return {
-        "record": record.model_dump(mode="json"),
+        "record": {**record.model_dump(mode="json"), "record_id": record_id},
         "summary": summary,
         "alert": alert,
         "fhir": alert_agent.to_fhir(record),
@@ -164,6 +179,11 @@ def ingest_batch(payload: BatchIngestRequest) -> dict:
     ]
     summary = surveillance_agent.summarize(records)
     alert = alert_agent.build_alert(summary)
+    record_ids: list[str] = []
+    for record in records:
+        record_ids.append(surveillance_store.save_record(record))
+    alert_id = surveillance_store.save_alert(alert, source="batch_ingest")
+    alert["alert_id"] = alert_id
     for record in records:
         ENCOUNTERS_BY_SYNDROME.labels(
             syndrome=record.syndrome_category,
@@ -177,10 +197,66 @@ def ingest_batch(payload: BatchIngestRequest) -> dict:
         escalation_level=alert.get("severity", "monitor"),
     ).inc()
     return {
-        "records": [record.model_dump(mode="json") for record in records],
+        "records": [
+            {**record.model_dump(mode="json"), "record_id": record_ids[idx]}
+            for idx, record in enumerate(records)
+        ],
         "summary": summary,
         "alert": alert,
     }
+
+
+@app.get("/records")
+def list_records(
+    limit: int = 50,
+    offset: int = 0,
+    state: str | None = None,
+    district: str | None = None,
+    syndrome: str | None = None,
+) -> dict:
+    records = surveillance_store.list_records(
+        limit=limit,
+        offset=offset,
+        state=state,
+        district=district,
+        syndrome=syndrome,
+    )
+    return {
+        "count": len(records),
+        "limit": limit,
+        "offset": offset,
+        "filters": {
+            "state": state,
+            "district": district,
+            "syndrome": syndrome,
+        },
+        "records": records,
+    }
+
+
+@app.get("/records/{record_id}")
+def get_record(record_id: str) -> dict:
+    record = surveillance_store.get_record(record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail={"message": "Record not found", "record_id": record_id})
+    return record
+
+
+@app.get("/alerts")
+def list_alerts(limit: int = 50, offset: int = 0, severity: str | None = None) -> dict:
+    alerts = surveillance_store.list_alerts(limit=limit, offset=offset, severity=severity)
+    return {
+        "count": len(alerts),
+        "limit": limit,
+        "offset": offset,
+        "severity": severity,
+        "alerts": alerts,
+    }
+
+
+@app.get("/stats/overview")
+def overview_stats() -> dict:
+    return surveillance_store.get_overview_stats()
 
 
 if __name__ == "__main__":
