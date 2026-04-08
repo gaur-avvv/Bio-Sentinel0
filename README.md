@@ -300,14 +300,14 @@ Bio Sentinel explicitly returns explanation strings for:
 ### Direct Uvicorn
 
 ```bash
-uvicorn src.api.app:app --host 0.0.0.0 --port ${PORT:-8000}
+python -m src.api.app
 ```
 
 ### Procfile Platforms
 
 Procfile start command:
 
-- uvicorn src.api.app:app --host 0.0.0.0 --port $PORT
+- python -m src.api.app
 
 ### Render
 
