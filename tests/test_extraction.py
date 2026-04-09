@@ -1,6 +1,7 @@
 from src.agents.intake_agent import IntakeAgent
 from fastapi.testclient import TestClient
 
+from src.api import app as app_module
 from src.api.app import app
 
 
@@ -214,3 +215,33 @@ def test_railway_health_without_configuration() -> None:
 def test_railway_records_returns_error_without_configuration() -> None:
     response = client.get("/railway/records")
     assert response.status_code == 503
+
+
+f test_storage_read_backend_endpoint() -> None:
+    response = client.get("/storage/read-backend")
+    assert response.status_code == 200
+    payload = response.json()
+    assert "configured" in payload
+    assert "effective" in payload
+
+
+def test_records_supabase_backend_mode_without_configuration_returns_503() -> None:
+    original = app_module.READ_BACKEND
+    app_module.READ_BACKEND = "supabase"
+    try:
+        response = client.get("/records")
+        assert response.status_code == 503
+    finally:
+        app_module.READ_BACKEND = original
+
+
+def test_records_hybrid_backend_mode_falls_back_to_sqlite() -> None:
+    original = app_module.READ_BACKEND
+    app_module.READ_BACKEND = "hybrid"
+    try:
+        response = client.get("/records")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["backend"] == "sqlite"
+    finally:
+        app_module.READ_BACKEND = original

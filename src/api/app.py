@@ -65,6 +65,7 @@ railway_store = RailwaySurveillanceStore(
 )
 SUPABASE_WRITE_THROUGH = os.getenv("SUPABASE_WRITE_THROUGH", "false").lower() in {"1", "true", "yes"}
 RAILWAY_WRITE_THROUGH = os.getenv("RAILWAY_WRITE_THROUGH", "false").lower() in {"1", "true", "yes"}
+READ_BACKEND = os.getenv("READ_BACKEND", "sqlite").strip().lower()
 
 
 class IngestRequest(BaseModel):
@@ -123,6 +124,154 @@ def _write_through_railway_alert(alert_payload: dict, source: str, linked_record
         railway_store.save_alert(alert_payload, source=source, linked_record_id=linked_record_id)
     except RailwayStoreError:
         return
+
+
+def _resolve_read_backend() -> str:
+    allowed = {"sqlite", "supabase", "railway", "hybrid"}
+    return READ_BACKEND if READ_BACKEND in allowed else "sqlite"
+
+
+def _list_records_from_backend(
+    *,
+    limit: int,
+    offset: int,
+    state: str | None,
+    district: str | None,
+    syndrome: str | None,
+) -> tuple[str, list[dict]]:
+    backend = _resolve_read_backend()
+
+    if backend == "sqlite":
+        return (
+            "sqlite",
+            surveillance_store.list_records(
+                limit=limit,
+                offset=offset,
+                state=state,
+                district=district,
+                syndrome=syndrome,
+            ),
+        )
+
+    if backend == "supabase":
+        return (
+            "supabase",
+            supabase_store.list_records(
+                limit=limit,
+                offset=offset,
+                state=state,
+                district=district,
+                syndrome=syndrome,
+            ),
+        )
+
+    if backend == "railway":
+        return (
+            "railway",
+            railway_store.list_records(
+                limit=limit,
+                offset=offset,
+                state=state,
+                district=district,
+                syndrome=syndrome,
+            ),
+        )
+
+    # Hybrid order: Railway -> Supabase -> SQLite fallback.
+    try:
+        if railway_store.enabled:
+            return (
+                "railway",
+                railway_store.list_records(
+                    limit=limit,
+                    offset=offset,
+                    state=state,
+                    district=district,
+                    syndrome=syndrome,
+                ),
+            )
+    except RailwayStoreError:
+        pass
+
+    try:
+        if supabase_store.enabled:
+            return (
+                "supabase",
+                supabase_store.list_records(
+                    limit=limit,
+                    offset=offset,
+                    state=state,
+                    district=district,
+                    syndrome=syndrome,
+                ),
+            )
+    except SupabaseStoreError:
+        pass
+
+    return (
+        "sqlite",
+        surveillance_store.list_records(
+            limit=limit,
+            offset=offset,
+            state=state,
+            district=district,
+            syndrome=syndrome,
+        ),
+    )
+
+
+def _get_record_from_backend(record_id: str) -> tuple[str, dict | None]:
+    backend = _resolve_read_backend()
+
+    if backend == "sqlite":
+        return "sqlite", surveillance_store.get_record(record_id)
+    if backend == "supabase":
+        return "supabase", supabase_store.get_record(record_id)
+    if backend == "railway":
+        return "railway", railway_store.get_record(record_id)
+
+    try:
+        if railway_store.enabled:
+            record = railway_store.get_record(record_id)
+            if record:
+                return "railway", record
+    except RailwayStoreError:
+        pass
+
+    try:
+        if supabase_store.enabled:
+            record = supabase_store.get_record(record_id)
+            if record:
+                return "supabase", record
+    except SupabaseStoreError:
+        pass
+
+    return "sqlite", surveillance_store.get_record(record_id)
+
+
+def _list_alerts_from_backend(*, limit: int, offset: int, severity: str | None) -> tuple[str, list[dict]]:
+    backend = _resolve_read_backend()
+
+    if backend == "sqlite":
+        return "sqlite", surveillance_store.list_alerts(limit=limit, offset=offset, severity=severity)
+    if backend == "supabase":
+        return "supabase", supabase_store.list_alerts(limit=limit, offset=offset, severity=severity)
+    if backend == "railway":
+        return "railway", railway_store.list_alerts(limit=limit, offset=offset, severity=severity)
+
+    try:
+        if railway_store.enabled:
+            return "railway", railway_store.list_alerts(limit=limit, offset=offset, severity=severity)
+    except RailwayStoreError:
+        pass
+
+    try:
+        if supabase_store.enabled:
+            return "supabase", supabase_store.list_alerts(limit=limit, offset=offset, severity=severity)
+    except SupabaseStoreError:
+        pass
+
+    return "sqlite", surveillance_store.list_alerts(limit=limit, offset=offset, severity=severity)
 
 
 @app.middleware("http")
@@ -206,7 +355,18 @@ def root() -> dict:
             "/railway/alerts",
             "/railway/sync/records",
             "/railway/sync/alerts",
+            "/storage/read-backend",
         ],
+    }
+
+
+@app.get("/storage/read-backend")
+def storage_read_backend() -> dict:
+    return {
+        "configured": READ_BACKEND,
+        "effective": _resolve_read_backend(),
+        "supabase_enabled": supabase_store.enabled,
+        "railway_enabled": railway_store.enabled,
     }
 
 
@@ -328,17 +488,22 @@ def list_records(
     district: str | None = None,
     syndrome: str | None = None,
 ) -> dict:
-    records = surveillance_store.list_records(
-        limit=limit,
-        offset=offset,
-        state=state,
-        district=district,
-        syndrome=syndrome,
-    )
+    try:
+        backend_used, records = _list_records_from_backend(
+            limit=limit,
+            offset=offset,
+            state=state,
+            district=district,
+            syndrome=syndrome,
+        )
+    except (SupabaseStoreError, RailwayStoreError) as exc:
+        raise HTTPException(status_code=503, detail={"message": str(exc)}) from exc
+
     return {
         "count": len(records),
         "limit": limit,
         "offset": offset,
+        "backend": backend_used,
         "filters": {
             "state": state,
             "district": district,
@@ -350,19 +515,28 @@ def list_records(
 
 @app.get("/records/{record_id}")
 def get_record(record_id: str) -> dict:
-    record = surveillance_store.get_record(record_id)
+    try:
+        backend_used, record = _get_record_from_backend(record_id)
+    except (SupabaseStoreError, RailwayStoreError) as exc:
+        raise HTTPException(status_code=503, detail={"message": str(exc)}) from exc
+
     if not record:
         raise HTTPException(status_code=404, detail={"message": "Record not found", "record_id": record_id})
-    return record
+    return {**record, "backend": backend_used}
 
 
 @app.get("/alerts")
 def list_alerts(limit: int = 50, offset: int = 0, severity: str | None = None) -> dict:
-    alerts = surveillance_store.list_alerts(limit=limit, offset=offset, severity=severity)
+    try:
+        backend_used, alerts = _list_alerts_from_backend(limit=limit, offset=offset, severity=severity)
+    except (SupabaseStoreError, RailwayStoreError) as exc:
+        raise HTTPException(status_code=503, detail={"message": str(exc)}) from exc
+
     return {
         "count": len(alerts),
         "limit": limit,
         "offset": offset,
+        "backend": backend_used,
         "severity": severity,
         "alerts": alerts,
     }

@@ -67,6 +67,17 @@ Railway API routes:
 - `POST /railway/sync/records`
 - `POST /railway/sync/alerts`
 
+Unified read mode for standard endpoints (`/records`, `/records/{record_id}`, `/alerts`):
+
+- `READ_BACKEND=sqlite` (default)
+- `READ_BACKEND=supabase`
+- `READ_BACKEND=railway`
+- `READ_BACKEND=hybrid` (Railway -> Supabase -> SQLite fallback)
+
+Read-backend status endpoint:
+
+- `GET /storage/read-backend`
+
 ## Key Features
 
 ### 0. Production Runtime Enhancements
