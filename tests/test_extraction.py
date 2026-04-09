@@ -217,7 +217,7 @@ def test_railway_records_returns_error_without_configuration() -> None:
     assert response.status_code == 503
 
 
-f test_storage_read_backend_endpoint() -> None:
+def test_storage_read_backend_endpoint() -> None:
     response = client.get("/storage/read-backend")
     assert response.status_code == 200
     payload = response.json()
