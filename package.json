@@ -1,0 +1,8 @@
+{
+  "name": "bio-sentinel0-prisma",
+  "private": true,
+  "version": "1.0.0",
+  "devDependencies": {
+    "prisma": "^6.0.0"
+  }
+}

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import time
 import uuid
+import importlib
 
 from fastapi import FastAPI
 from fastapi import HTTPException
@@ -27,6 +28,9 @@ from src.observability.metrics.custom_metrics import (
     ENCOUNTERS_BY_SYNDROME,
     record_http_request,
 )
+
+if importlib.util.find_spec("dotenv") is not None:
+    importlib.import_module("dotenv").load_dotenv()
 
 app = FastAPI(title="Bio Sentinel API", version="0.1.0")
 
