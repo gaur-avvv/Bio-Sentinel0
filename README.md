@@ -18,6 +18,55 @@ Enable faster outbreak signal detection by helping frontline workers and public 
 
 - Full production blueprint is available in `docs/production_implementation_guide.md`.
 
+## Supabase Integration
+
+Bio Sentinel now supports optional Supabase storage for records and alerts in addition to local SQLite.
+
+Environment variables:
+
+- `SUPABASE_URL`: Your project URL (for example, `https://<project-ref>.supabase.co`)
+- `SUPABASE_KEY`: Service role key (recommended for backend writes)
+- `SUPABASE_RECORDS_TABLE`: Records table name (default: `encounters`)
+- `SUPABASE_ALERTS_TABLE`: Alerts table name (default: `alerts`)
+- `SUPABASE_WRITE_THROUGH`: If `true`, writes from ingest endpoints are mirrored to Supabase
+
+New API routes:
+
+- `POST /pipeline/predict` - Model-assisted syndrome prediction (MedGemma path if enabled)
+- `POST /records/manual` - Create a fully structured record directly
+- `GET /supabase/health` - Verify Supabase connectivity
+- `GET /supabase/records` - Fetch records from Supabase
+- `GET /supabase/records/{record_id}` - Fetch one Supabase record
+- `GET /supabase/alerts` - Fetch alerts from Supabase
+- `POST /supabase/sync/records` - Sync local SQLite records to Supabase
+- `POST /supabase/sync/alerts` - Sync local SQLite alerts to Supabase
+
+Model-assisted intake environment variables:
+
+- `INTAKE_USE_MODEL=true` to enable model-assisted extraction
+- `INTAKE_INFERENCE_BACKEND=medgemma_gguf` (or `heuristic`)
+- `MEDGEMMA_PATH=/models/medgemma-4b-indic-q4_k_m.gguf` for local GGUF model path
+
+## Railway Storage Integration
+
+Bio Sentinel also supports Railway Postgres as a persistent backend.
+
+Environment variables:
+
+- `DATABASE_URL`: Railway Postgres connection string (or `RAILWAY_DATABASE_URL`)
+- `RAILWAY_RECORDS_TABLE`: Records table name (default: `encounters`)
+- `RAILWAY_ALERTS_TABLE`: Alerts table name (default: `alerts`)
+- `RAILWAY_WRITE_THROUGH`: If `true`, ingest writes are mirrored to Railway Postgres
+
+Railway API routes:
+
+- `GET /railway/health`
+- `GET /railway/records`
+- `GET /railway/records/{record_id}`
+- `GET /railway/alerts`
+- `POST /railway/sync/records`
+- `POST /railway/sync/alerts`
+
 ## Key Features
 
 ### 0. Production Runtime Enhancements
@@ -33,301 +82,301 @@ Enable faster outbreak signal detection by helping frontline workers and public 
 - Keyword and phrase-based extraction for English and code-mixed Hindi-style narratives
 - Syndrome mapping for key categories such as:
   - acute_watery_diarrhea
-  - acute_febrile_illness
-  - acute_respiratory_infection
-  - acute_rash_with_fever
-  - acute_neurological_syndrome
-- Onset-day extraction from narrative text
-- Structured record output with location, flags, and ICD-style fields
-
-### 2. Surveillance Analytics
-
-- Syndrome-wise aggregation and forecasting baseline
-- Poisson and CUSUM-based risk components
-- Config-driven thresholds through YAML
-- Outbreak risk scoring and anomaly detail output
-
-### 3. Escalation and Interoperability
-
-- Severity-tier alert creation:
-  - monitor
-  - district_alert
-  - state_escalation
-- FHIR-like bundle output for interoperability pathways
-
-### 4. ADK-Style Multi-Agent System
-
-Bio Sentinel now includes an advanced internal ADK runtime with specialist agents, tools, and skills.
-
-Agents:
-
-- intake_specialist
-- surveillance_analyst
-- medical_rag_agent
-- multimodal_analyzer
-- uncertainty_evaluator
-- escalation_coordinator
-- api_integration_agent
-
-Tools:
-
-- extract_case
-- generate_fhir
-- analyze_batch
-- create_alert
-- retrieve_protocols
-- multimodal_fusion
-- evaluate_uncertainty
-- sync_report
-
-Skills:
-
-- triage_explanation
-- risk_explanation
-- rag_explanation
-- referral_explanation
-- workflow_explanation
-
-### 5. Streamlit Full Project Console
-
-The Streamlit workspace provides:
-
-- Single-case pipeline run
-- Real-world batch simulation from fixture data
-- Multimodal confidence controls (text/audio/image fusion inputs)
-- Agent catalog and graph blueprint
-- Explainability panels for each stage
-- Offline sync queue inspector
-
-### 6. Real-World Test Fixtures and Scenario Testing
-
-- India-focused fixture cases included
-- Integration-style tests for cluster behavior and risk movement
-- ADK orchestration tests for agent outputs and graph blueprint
-
-### 7. Hosting Ready
-
-- Uvicorn app server entrypoint
-- Procfile support
-- Render configuration
-- Railway configuration
-- Dockerfile and dockerignore
-
-### 8. Observability and Monitoring
-
-- Prometheus metrics module at `src/observability/metrics/custom_metrics.py`
-- API metrics endpoint: `/metrics`
-- Prometheus scrape config: `monitoring/prometheus.yml`
-- Grafana provisioning and dashboard JSON under `monitoring/grafana/`
-- Docker Compose stack with API, Streamlit, Prometheus, and Grafana
-
-## Project Structure
-
-```text
-Bio-Sentinel0/
-├── README.md
-├── requirements.txt
-├── Makefile
-├── Procfile
-├── Dockerfile
-├── .dockerignore
-├── railway.json
-├── render.yaml
-├── streamlit_app.py
-├── configs/
-│   ├── model_config.yaml
-│   └── surveillance_config.yaml
-├── docs/
-│   ├── technical_overview.md
-│   ├── india_adaptation.md
-│   └── india_resource_guide.md
-├── scripts/
-│   ├── generate_training_data.py
-│   ├── run_evaluation.py
-│   └── run_finetune.py
-├── src/
-│   ├── api/
-│   ├── agents/
-│   ├── adk/
-│   ├── data/
-│   ├── models/
-│   ├── sync/
-│   └── utils/
-└── tests/
-    ├── fixtures/
-    ├── test_extraction.py
-    ├── test_realworld_scenarios.py
-    ├── test_adk_orchestration.py
-    ├── test_inference_adapter.py
-    └── test_offline_sync.py
-```
-
-## Core Technology Stack
-
-Backend and API:
-
-- FastAPI
-- Uvicorn
-- Pydantic
-
-Data and config:
-
-- PyYAML
-
-Testing:
-
-- Pytest
-- FastAPI TestClient via httpx
-
-Interactive app:
-
-- Streamlit
-
-Architecture:
-
-- Internal ADK-style runtime for agent, tool, and skill orchestration
-- Optional Google ADK bridge detection support
-- Clinical state model: `src/adk/state.py`
-- Inference adapter layer: `src/models/inference_adapter.py`
-- Offline sync engine: `src/sync/offline_queue.py`
-- API sync integration tool: `src/agents/api_integration_agent.py`
-
-## Installation
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-## Run the API
-
-```bash
-python -m src.api.app
-```
-
-Default endpoint checks:
-
-- GET /health
-- GET /records
-- GET /records/{record_id}
-- GET /alerts
-- GET /stats/overview
-- POST /pipeline/ingest
-- POST /pipeline/ingest-batch
-
-## Run Streamlit (Full Workspace)
-
-```bash
-streamlit run streamlit_app.py --server.port ${PORT:-8501} --server.address 0.0.0.0
-```
-
-## Frontend Integration Section (Web App)
-
-Use this section name in your frontend navigation:
-
-- `Surveillance Integration Hub`
-
-Recommended frontend page blocks:
-
-1. `Case Intake Panel` (single case submit)
-2. `Batch Intake Panel` (multiple case submit)
-3. `Records Explorer` (filter by state/district/syndrome)
-4. `Alerts Feed` (monitor/district/state alerts)
-5. `Overview Stats` (counts and top syndromes)
-
-Frontend environment configuration:
-
-- `VITE_API_BASE_URL=https://<your-api-domain>`
-
-Example:
-
-```bash
-VITE_API_BASE_URL=https://bio-sentinel-api.up.railway.app
-```
-
-Suggested API client (`src/lib/biosentinelApi.ts`):
-
-```ts
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
-
-type IngestRequest = {
-  text: string;
-  state: string;
-  district: string;
-};
-
-type BatchIngestRequest = {
-  events: IngestRequest[];
-};
-
-async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers || {}),
-    },
-    ...init,
-  });
-
-  if (!response.ok) {
-    const errorBody = await response.json().catch(() => ({}));
-    throw new Error(errorBody?.error?.message || `API error: ${response.status}`);
-  }
-
-  return response.json() as Promise<T>;
-}
-
-export const biosentinelApi = {
-  health: () => apiFetch<{ status: string; service: string }>("/health"),
-
-  ingestCase: (payload: IngestRequest) =>
-    apiFetch("/pipeline/ingest", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
-
-  ingestBatch: (payload: BatchIngestRequest) =>
-    apiFetch("/pipeline/ingest-batch", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
-
-  listRecords: (params?: {
-    limit?: number;
-    offset?: number;
-    state?: string;
-    district?: string;
-    syndrome?: string;
-  }) => {
-    const query = new URLSearchParams(
-      Object.entries(params || {}).reduce((acc, [k, v]) => {
-        if (v !== undefined && v !== null && v !== "") acc[k] = String(v);
-        return acc;
-      }, {} as Record<string, string>)
-    ).toString();
-    return apiFetch(`/records${query ? `?${query}` : ""}`);
-  },
-
-  getRecord: (recordId: string) => apiFetch(`/records/${recordId}`),
-
-  listAlerts: (params?: { limit?: number; offset?: number; severity?: string }) => {
-    const query = new URLSearchParams(
-      Object.entries(params || {}).reduce((acc, [k, v]) => {
-        if (v !== undefined && v !== null && v !== "") acc[k] = String(v);
-        return acc;
-      }, {} as Record<string, string>)
-    ).toString();
-    return apiFetch(`/alerts${query ? `?${query}` : ""}`);
-  },
-
-  overviewStats: () => apiFetch("/stats/overview"),
-};
-```
-
-Frontend route suggestion:
-
-- `/surveillance-integration`
+    - acute_febrile_illness
+      - acute_respiratory_infection
+        - acute_rash_with_fever
+          - acute_neurological_syndrome
+          - Onset-day extraction from narrative text
+          - Structured record output with location, flags, and ICD-style fields
+          
+          ### 2. Surveillance Analytics
+          
+          - Syndrome-wise aggregation and forecasting baseline
+          - Poisson and CUSUM-based risk components
+          - Config-driven thresholds through YAML
+          - Outbreak risk scoring and anomaly detail output
+          
+          ### 3. Escalation and Interoperability
+          
+          - Severity-tier alert creation:
+            - monitor
+              - district_alert
+                - state_escalation
+                - FHIR-like bundle output for interoperability pathways
+                
+                ### 4. ADK-Style Multi-Agent System
+                
+                Bio Sentinel now includes an advanced internal ADK runtime with specialist agents, tools, and skills.
+                
+                Agents:
+                
+                - intake_specialist
+                - surveillance_analyst
+                - medical_rag_agent
+                - multimodal_analyzer
+                - uncertainty_evaluator
+                - escalation_coordinator
+                - api_integration_agent
+                
+                Tools:
+                
+                - extract_case
+                - generate_fhir
+                - analyze_batch
+                - create_alert
+                - retrieve_protocols
+                - multimodal_fusion
+                - evaluate_uncertainty
+                - sync_report
+                
+                Skills:
+                
+                - triage_explanation
+                - risk_explanation
+                - rag_explanation
+                - referral_explanation
+                - workflow_explanation
+                
+                ### 5. Streamlit Full Project Console
+                
+                The Streamlit workspace provides:
+                
+                - Single-case pipeline run
+                - Real-world batch simulation from fixture data
+                - Multimodal confidence controls (text/audio/image fusion inputs)
+                - Agent catalog and graph blueprint
+                - Explainability panels for each stage
+                - Offline sync queue inspector
+                
+                ### 6. Real-World Test Fixtures and Scenario Testing
+                
+                - India-focused fixture cases included
+                - Integration-style tests for cluster behavior and risk movement
+                - ADK orchestration tests for agent outputs and graph blueprint
+                
+                ### 7. Hosting Ready
+                
+                - Uvicorn app server entrypoint
+                - Procfile support
+                - Render configuration
+                - Railway configuration
+                - Dockerfile and dockerignore
+                
+                ### 8. Observability and Monitoring
+                
+                - Prometheus metrics module at `src/observability/metrics/custom_metrics.py`
+                - API metrics endpoint: `/metrics`
+                - Prometheus scrape config: `monitoring/prometheus.yml`
+                - Grafana provisioning and dashboard JSON under `monitoring/grafana/`
+                - Docker Compose stack with API, Streamlit, Prometheus, and Grafana
+                
+                ## Project Structure
+                
+                ```text
+                Bio-Sentinel0/
+                ├── README.md
+                ├── requirements.txt
+                ├── Makefile
+                ├── Procfile
+                ├── Dockerfile
+                ├── .dockerignore
+                ├── railway.json
+                ├── render.yaml
+                ├── streamlit_app.py
+                ├── configs/
+                │   ├── model_config.yaml
+                │   └── surveillance_config.yaml
+                ├── docs/
+                │   ├── technical_overview.md
+                │   ├── india_adaptation.md
+                │   └── india_resource_guide.md
+                ├── scripts/
+                │   ├── generate_training_data.py
+                │   ├── run_evaluation.py
+                │   └── run_finetune.py
+                ├── src/
+                │   ├── api/
+                │   ├── agents/
+                │   ├── adk/
+                │   ├── data/
+                │   ├── models/
+                │   ├── sync/
+                │   └── utils/
+                └── tests/
+                    ├── fixtures/
+                        ├── test_extraction.py
+                            ├── test_realworld_scenarios.py
+                                ├── test_adk_orchestration.py
+                                    ├── test_inference_adapter.py
+                                        └── test_offline_sync.py
+                                        ```
+                                        
+                                        ## Core Technology Stack
+                                        
+                                        Backend and API:
+                                        
+                                        - FastAPI
+                                        - Uvicorn
+                                        - Pydantic
+                                        
+                                        Data and config:
+                                        
+                                        - PyYAML
+                                        
+                                        Testing:
+                                        
+                                        - Pytest
+                                        - FastAPI TestClient via httpx
+                                        
+                                        Interactive app:
+                                        
+                                        - Streamlit
+                                        
+                                        Architecture:
+                                        
+                                        - Internal ADK-style runtime for agent, tool, and skill orchestration
+                                        - Optional Google ADK bridge detection support
+                                        - Clinical state model: `src/adk/state.py`
+                                        - Inference adapter layer: `src/models/inference_adapter.py`
+                                        - Offline sync engine: `src/sync/offline_queue.py`
+                                        - API sync integration tool: `src/agents/api_integration_agent.py`
+                                        
+                                        ## Installation
+                                        
+                                        ```bash
+                                        python -m venv .venv
+                                        source .venv/bin/activate
+                                        pip install -r requirements.txt
+                                        ```
+                                        
+                                        ## Run the API
+                                        
+                                        ```bash
+                                        python -m src.api.app
+                                        ```
+                                        
+                                        Default endpoint checks:
+                                        
+                                        - GET /health
+                                        - GET /records
+                                        - GET /records/{record_id}
+                                        - GET /alerts
+                                        - GET /stats/overview
+                                        - POST /pipeline/ingest
+                                        - POST /pipeline/ingest-batch
+                                        
+                                        ## Run Streamlit (Full Workspace)
+                                        
+                                        ```bash
+                                        streamlit run streamlit_app.py --server.port ${PORT:-8501} --server.address 0.0.0.0
+                                        ```
+                                        
+                                        ## Frontend Integration Section (Web App)
+                                        
+                                        Use this section name in your frontend navigation:
+                                        
+                                        - `Surveillance Integration Hub`
+                                        
+                                        Recommended frontend page blocks:
+                                        
+                                        1. `Case Intake Panel` (single case submit)
+                                        2. `Batch Intake Panel` (multiple case submit)
+                                        3. `Records Explorer` (filter by state/district/syndrome)
+                                        4. `Alerts Feed` (monitor/district/state alerts)
+                                        5. `Overview Stats` (counts and top syndromes)
+                                        
+                                        Frontend environment configuration:
+                                        
+                                        - `VITE_API_BASE_URL=https://<your-api-domain>`
+                                        
+                                        Example:
+                                        
+                                        ```bash
+                                        VITE_API_BASE_URL=https://bio-sentinel-api.up.railway.app
+                                        ```
+                                        
+                                        Suggested API client (`src/lib/biosentinelApi.ts`):
+                                        
+                                        ```ts
+                                        const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+                                        
+                                        type IngestRequest = {
+                                          text: string;
+                                            state: string;
+                                              district: string;
+                                              };
+                                              
+                                              type BatchIngestRequest = {
+                                                events: IngestRequest[];
+                                                };
+                                                
+                                                async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+                                                  const response = await fetch(`${API_BASE_URL}${path}`, {
+                                                      headers: {
+                                                            "Content-Type": "application/json",
+                                                                  ...(init?.headers || {}),
+                                                                      },
+                                                                          ...init,
+                                                                            });
+                                                                            
+                                                                              if (!response.ok) {
+                                                                                  const errorBody = await response.json().catch(() => ({}));
+                                                                                      throw new Error(errorBody?.error?.message || `API error: ${response.status}`);
+                                                                                        }
+                                                                                        
+                                                                                          return response.json() as Promise<T>;
+                                                                                          }
+                                                                                          
+                                                                                          export const biosentinelApi = {
+                                                                                            health: () => apiFetch<{ status: string; service: string }>("/health"),
+                                                                                            
+                                                                                              ingestCase: (payload: IngestRequest) =>
+                                                                                                  apiFetch("/pipeline/ingest", {
+                                                                                                        method: "POST",
+                                                                                                              body: JSON.stringify(payload),
+                                                                                                                  }),
+                                                                                                                  
+                                                                                                                    ingestBatch: (payload: BatchIngestRequest) =>
+                                                                                                                        apiFetch("/pipeline/ingest-batch", {
+                                                                                                                              method: "POST",
+                                                                                                                                    body: JSON.stringify(payload),
+                                                                                                                                        }),
+                                                                                                                                        
+                                                                                                                                          listRecords: (params?: {
+                                                                                                                                              limit?: number;
+                                                                                                                                                  offset?: number;
+                                                                                                                                                      state?: string;
+                                                                                                                                                          district?: string;
+                                                                                                                                                              syndrome?: string;
+                                                                                                                                                                }) => {
+                                                                                                                                                                    const query = new URLSearchParams(
+                                                                                                                                                                          Object.entries(params || {}).reduce((acc, [k, v]) => {
+                                                                                                                                                                                  if (v !== undefined && v !== null && v !== "") acc[k] = String(v);
+                                                                                                                                                                                          return acc;
+                                                                                                                                                                                                }, {} as Record<string, string>)
+                                                                                                                                                                                                    ).toString();
+                                                                                                                                                                                                        return apiFetch(`/records${query ? `?${query}` : ""}`);
+                                                                                                                                                                                                          },
+                                                                                                                                                                                                          
+                                                                                                                                                                                                            getRecord: (recordId: string) => apiFetch(`/records/${recordId}`),
+                                                                                                                                                                                                            
+                                                                                                                                                                                                              listAlerts: (params?: { limit?: number; offset?: number; severity?: string }) => {
+                                                                                                                                                                                                                  const query = new URLSearchParams(
+                                                                                                                                                                                                                        Object.entries(params || {}).reduce((acc, [k, v]) => {
+                                                                                                                                                                                                                                if (v !== undefined && v !== null && v !== "") acc[k] = String(v);
+                                                                                                                                                                                                                                        return acc;
+                                                                                                                                                                                                                                              }, {} as Record<string, string>)
+                                                                                                                                                                                                                                                  ).toString();
+                                                                                                                                                                                                                                                      return apiFetch(`/alerts${query ? `?${query}` : ""}`);
+                                                                                                                                                                                                                                                        },
+                                                                                                                                                                                                                                                        
+                                                                                                                                                                                                                                                          overviewStats: () => apiFetch("/stats/overview"),
+                                                                                                                                                                                                                                                          };
+                                                                                                                                                                                                                                                          ```
+                                                                                                                                                                                                                                                          
+                                                                                                                                                                                                                                                          Frontend route suggestion:
+                                                                                                                                                                                                                                                          
+                                                                                                                                                                                                                                                          - `/surveillance-integration`
 
 Minimal route component structure:
 

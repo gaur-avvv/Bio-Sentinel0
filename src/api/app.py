@@ -6,6 +6,7 @@ import uuid
 
 from fastapi import FastAPI
 from fastapi import HTTPException
+from fastapi import Query
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.requests import Request
@@ -17,7 +18,10 @@ from pydantic import BaseModel
 from src.agents.alert_agent import AlertAgent
 from src.agents.intake_agent import IntakeAgent
 from src.agents.surveillance_agent import SurveillanceAgent
+from src.data.railway_store import RailwayStoreError, RailwaySurveillanceStore
 from src.data.surveillance_store import SurveillanceStore
+from src.data.supabase_store import SupabaseStoreError, SupabaseSurveillanceStore
+from src.data.syndromic_schema import SyndromicRecord
 from src.observability.metrics.custom_metrics import (
     ALERTS_GENERATED,
     ENCOUNTERS_BY_SYNDROME,
@@ -48,6 +52,19 @@ intake_agent = IntakeAgent()
 surveillance_agent = SurveillanceAgent()
 alert_agent = AlertAgent()
 surveillance_store = SurveillanceStore(db_path=os.getenv("SURVEILLANCE_DB_PATH", "data/surveillance.db"))
+supabase_store = SupabaseSurveillanceStore(
+    url=os.getenv("SUPABASE_URL"),
+    service_key=os.getenv("SUPABASE_KEY"),
+    records_table=os.getenv("SUPABASE_RECORDS_TABLE", "encounters"),
+    alerts_table=os.getenv("SUPABASE_ALERTS_TABLE", "alerts"),
+)
+railway_store = RailwaySurveillanceStore(
+    database_url=os.getenv("RAILWAY_DATABASE_URL") or os.getenv("DATABASE_URL"),
+    records_table=os.getenv("RAILWAY_RECORDS_TABLE", "encounters"),
+    alerts_table=os.getenv("RAILWAY_ALERTS_TABLE", "alerts"),
+)
+SUPABASE_WRITE_THROUGH = os.getenv("SUPABASE_WRITE_THROUGH", "false").lower() in {"1", "true", "yes"}
+RAILWAY_WRITE_THROUGH = os.getenv("RAILWAY_WRITE_THROUGH", "false").lower() in {"1", "true", "yes"}
 
 
 class IngestRequest(BaseModel):
@@ -58,6 +75,54 @@ class IngestRequest(BaseModel):
 
 class BatchIngestRequest(BaseModel):
     events: list[IngestRequest]
+
+
+class PredictRequest(BaseModel):
+    text: str
+    state: str
+    district: str
+    language: str = "eng"
+
+
+class RecordCreateRequest(BaseModel):
+    record: SyndromicRecord
+
+
+def _write_through_supabase_record(record_payload: dict) -> None:
+    if not (SUPABASE_WRITE_THROUGH and supabase_store.enabled):
+        return
+    try:
+        supabase_store.save_record_payload(record_payload)
+    except SupabaseStoreError:
+        # Keep local ingest resilient if cloud write-through is unavailable.
+        return
+
+
+def _write_through_supabase_alert(alert_payload: dict, source: str, linked_record_id: str | None = None) -> None:
+    if not (SUPABASE_WRITE_THROUGH and supabase_store.enabled):
+        return
+    try:
+        supabase_store.save_alert(alert_payload, source=source, linked_record_id=linked_record_id)
+    except SupabaseStoreError:
+        return
+
+
+def _write_through_railway_record(record_payload: dict) -> None:
+    if not (RAILWAY_WRITE_THROUGH and railway_store.enabled):
+        return
+    try:
+        railway_store.save_record_payload(record_payload)
+    except RailwayStoreError:
+        return
+
+
+def _write_through_railway_alert(alert_payload: dict, source: str, linked_record_id: str | None = None) -> None:
+    if not (RAILWAY_WRITE_THROUGH and railway_store.enabled):
+        return
+    try:
+        railway_store.save_alert(alert_payload, source=source, linked_record_id=linked_record_id)
+    except RailwayStoreError:
+        return
 
 
 @app.middleware("http")
@@ -121,12 +186,26 @@ def root() -> dict:
         "endpoints": [
             "/health",
             "/metrics",
+            "/pipeline/predict",
             "/pipeline/ingest",
             "/pipeline/ingest-batch",
+            "/records/manual",
             "/records",
             "/records/{record_id}",
             "/alerts",
             "/stats/overview",
+            "/supabase/health",
+            "/supabase/records",
+            "/supabase/records/{record_id}",
+            "/supabase/alerts",
+            "/supabase/sync/records",
+            "/supabase/sync/alerts",
+            "/railway/health",
+            "/railway/records",
+            "/railway/records/{record_id}",
+            "/railway/alerts",
+            "/railway/sync/records",
+            "/railway/sync/alerts",
         ],
     }
 
@@ -134,6 +213,20 @@ def root() -> dict:
 @app.get("/metrics")
 def metrics() -> Response:
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+@app.post("/pipeline/predict")
+def predict(payload: PredictRequest) -> dict:
+    prediction = intake_agent.predict_case(
+        text=payload.text,
+        state=payload.state,
+        district=payload.district,
+        language=payload.language,
+    )
+    return {
+        "prediction": prediction,
+        "inference_enabled": intake_agent.use_model,
+    }
 
 
 @app.post("/pipeline/ingest")
@@ -153,6 +246,10 @@ def ingest(payload: IngestRequest) -> dict:
     alert = alert_agent.build_alert(summary)
     record_id = surveillance_store.save_record(record)
     alert_id = surveillance_store.save_alert(alert, source="single_ingest", linked_record_id=record_id)
+    _write_through_supabase_record({**record.model_dump(mode="json"), "record_id": record_id})
+    _write_through_supabase_alert(alert, source="single_ingest", linked_record_id=record_id)
+    _write_through_railway_record({**record.model_dump(mode="json"), "record_id": record_id})
+    _write_through_railway_alert(alert, source="single_ingest", linked_record_id=record_id)
     alert["alert_id"] = alert_id
     ALERTS_GENERATED.labels(
         alert_type="single_ingest",
@@ -184,6 +281,14 @@ def ingest_batch(payload: BatchIngestRequest) -> dict:
         record_ids.append(surveillance_store.save_record(record))
     alert_id = surveillance_store.save_alert(alert, source="batch_ingest")
     alert["alert_id"] = alert_id
+    if SUPABASE_WRITE_THROUGH and supabase_store.enabled:
+        for idx, record in enumerate(records):
+            _write_through_supabase_record({**record.model_dump(mode="json"), "record_id": record_ids[idx]})
+        _write_through_supabase_alert(alert, source="batch_ingest")
+    if RAILWAY_WRITE_THROUGH and railway_store.enabled:
+        for idx, record in enumerate(records):
+            _write_through_railway_record({**record.model_dump(mode="json"), "record_id": record_ids[idx]})
+        _write_through_railway_alert(alert, source="batch_ingest")
     for record in records:
         ENCOUNTERS_BY_SYNDROME.labels(
             syndrome=record.syndrome_category,
@@ -204,6 +309,15 @@ def ingest_batch(payload: BatchIngestRequest) -> dict:
         "summary": summary,
         "alert": alert,
     }
+
+
+@app.post("/records/manual")
+def create_manual_record(payload: RecordCreateRequest) -> dict:
+    record_id = surveillance_store.save_record(payload.record)
+    record_json = {**payload.record.model_dump(mode="json"), "record_id": record_id}
+    _write_through_supabase_record(record_json)
+    _write_through_railway_record(record_json)
+    return {"record_id": record_id, "record": record_json}
 
 
 @app.get("/records")
@@ -257,6 +371,224 @@ def list_alerts(limit: int = 50, offset: int = 0, severity: str | None = None) -
 @app.get("/stats/overview")
 def overview_stats() -> dict:
     return surveillance_store.get_overview_stats()
+
+
+@app.get("/supabase/health")
+def supabase_health() -> dict:
+    return supabase_store.health()
+
+
+@app.get("/supabase/records")
+def list_supabase_records(
+    limit: int = 50,
+    offset: int = 0,
+    state: str | None = None,
+    district: str | None = None,
+    syndrome: str | None = None,
+) -> dict:
+    try:
+        records = supabase_store.list_records(
+            limit=limit,
+            offset=offset,
+            state=state,
+            district=district,
+            syndrome=syndrome,
+        )
+    except SupabaseStoreError as exc:
+        raise HTTPException(status_code=503, detail={"message": str(exc)}) from exc
+
+    return {
+        "count": len(records),
+        "limit": limit,
+        "offset": offset,
+        "filters": {
+            "state": state,
+            "district": district,
+            "syndrome": syndrome,
+        },
+        "records": records,
+    }
+
+
+@app.get("/supabase/records/{record_id}")
+def get_supabase_record(record_id: str) -> dict:
+    try:
+        record = supabase_store.get_record(record_id)
+    except SupabaseStoreError as exc:
+        raise HTTPException(status_code=503, detail={"message": str(exc)}) from exc
+    if not record:
+        raise HTTPException(status_code=404, detail={"message": "Record not found", "record_id": record_id})
+    return record
+
+
+@app.get("/supabase/alerts")
+def list_supabase_alerts(limit: int = 50, offset: int = 0, severity: str | None = None) -> dict:
+    try:
+        alerts = supabase_store.list_alerts(limit=limit, offset=offset, severity=severity)
+    except SupabaseStoreError as exc:
+        raise HTTPException(status_code=503, detail={"message": str(exc)}) from exc
+    return {
+        "count": len(alerts),
+        "limit": limit,
+        "offset": offset,
+        "severity": severity,
+        "alerts": alerts,
+    }
+
+
+@app.post("/supabase/sync/records")
+def sync_records_to_supabase(limit: int = Query(200, ge=1, le=2000), offset: int = Query(0, ge=0)) -> dict:
+    if not supabase_store.enabled:
+        raise HTTPException(status_code=400, detail={"message": "Supabase is not configured"})
+
+    local_records = surveillance_store.list_records(limit=limit, offset=offset)
+    synced = 0
+    failed = 0
+    for record in local_records:
+        try:
+            supabase_store.save_record_payload(record)
+            synced += 1
+        except SupabaseStoreError:
+            failed += 1
+    return {
+        "synced": synced,
+        "failed": failed,
+        "attempted": len(local_records),
+    }
+
+
+@app.post("/supabase/sync/alerts")
+def sync_alerts_to_supabase(limit: int = Query(200, ge=1, le=2000), offset: int = Query(0, ge=0)) -> dict:
+    if not supabase_store.enabled:
+        raise HTTPException(status_code=400, detail={"message": "Supabase is not configured"})
+
+    local_alerts = surveillance_store.list_alerts(limit=limit, offset=offset)
+    synced = 0
+    failed = 0
+    for alert in local_alerts:
+        try:
+            supabase_store.save_alert(
+                alert,
+                source=str(alert.get("source", "sqlite_sync")),
+                linked_record_id=alert.get("linked_record_id"),
+            )
+            synced += 1
+        except SupabaseStoreError:
+            failed += 1
+    return {
+        "synced": synced,
+        "failed": failed,
+        "attempted": len(local_alerts),
+    }
+
+
+@app.get("/railway/health")
+def railway_health() -> dict:
+    return railway_store.health()
+
+
+@app.get("/railway/records")
+def list_railway_records(
+    limit: int = 50,
+    offset: int = 0,
+    state: str | None = None,
+    district: str | None = None,
+    syndrome: str | None = None,
+) -> dict:
+    try:
+        records = railway_store.list_records(
+            limit=limit,
+            offset=offset,
+            state=state,
+            district=district,
+            syndrome=syndrome,
+        )
+    except RailwayStoreError as exc:
+        raise HTTPException(status_code=503, detail={"message": str(exc)}) from exc
+
+    return {
+        "count": len(records),
+        "limit": limit,
+        "offset": offset,
+        "filters": {
+            "state": state,
+            "district": district,
+            "syndrome": syndrome,
+        },
+        "records": records,
+    }
+
+
+@app.get("/railway/records/{record_id}")
+def get_railway_record(record_id: str) -> dict:
+    try:
+        record = railway_store.get_record(record_id)
+    except RailwayStoreError as exc:
+        raise HTTPException(status_code=503, detail={"message": str(exc)}) from exc
+    if not record:
+        raise HTTPException(status_code=404, detail={"message": "Record not found", "record_id": record_id})
+    return record
+
+
+@app.get("/railway/alerts")
+def list_railway_alerts(limit: int = 50, offset: int = 0, severity: str | None = None) -> dict:
+    try:
+        alerts = railway_store.list_alerts(limit=limit, offset=offset, severity=severity)
+    except RailwayStoreError as exc:
+        raise HTTPException(status_code=503, detail={"message": str(exc)}) from exc
+    return {
+        "count": len(alerts),
+        "limit": limit,
+        "offset": offset,
+        "severity": severity,
+        "alerts": alerts,
+    }
+
+
+@app.post("/railway/sync/records")
+def sync_records_to_railway(limit: int = Query(200, ge=1, le=2000), offset: int = Query(0, ge=0)) -> dict:
+    if not railway_store.enabled:
+        raise HTTPException(status_code=400, detail={"message": "Railway storage is not configured"})
+
+    local_records = surveillance_store.list_records(limit=limit, offset=offset)
+    synced = 0
+    failed = 0
+    for record in local_records:
+        try:
+            railway_store.save_record_payload(record)
+            synced += 1
+        except RailwayStoreError:
+            failed += 1
+    return {
+        "synced": synced,
+        "failed": failed,
+        "attempted": len(local_records),
+    }
+
+
+@app.post("/railway/sync/alerts")
+def sync_alerts_to_railway(limit: int = Query(200, ge=1, le=2000), offset: int = Query(0, ge=0)) -> dict:
+    if not railway_store.enabled:
+        raise HTTPException(status_code=400, detail={"message": "Railway storage is not configured"})
+
+    local_alerts = surveillance_store.list_alerts(limit=limit, offset=offset)
+    synced = 0
+    failed = 0
+    for alert in local_alerts:
+        try:
+            railway_store.save_alert(
+                alert,
+                source=str(alert.get("source", "sqlite_sync")),
+                linked_record_id=alert.get("linked_record_id"),
+            )
+            synced += 1
+        except RailwayStoreError:
+            failed += 1
+    return {
+        "synced": synced,
+        "failed": failed,
+        "attempted": len(local_alerts),
+    }
 
 
 if __name__ == "__main__":

@@ -101,6 +101,53 @@ def test_batch_ingest_endpoint() -> None:
     assert isinstance(payload["summary"]["anomaly_details"], dict)
 
 
+def test_predict_endpoint_returns_prediction_payload() -> None:
+    response = client.post(
+        "/pipeline/predict",
+        json={
+            "text": "Patient has fever and cough for 2 days",
+            "state": "Maharashtra",
+            "district": "Pune",
+            "language": "eng",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert "prediction" in payload
+    assert payload["prediction"]["syndrome"] in {
+        "acute_febrile_illness",
+        "acute_respiratory_infection",
+        "acute_watery_diarrhea",
+        "acute_rash_with_fever",
+        "acute_neurological_syndrome",
+    }
+    assert "model_backend" in payload["prediction"]
+
+
+def test_manual_record_create_endpoint() -> None:
+    response = client.post(
+        "/records/manual",
+        json={
+            "record": {
+                "patient_id": "anon-manual",
+                "timestamp": "2026-01-01T00:00:00+00:00",
+                "symptoms": ["fever"],
+                "syndrome_category": "acute_febrile_illness",
+                "severity": "moderate",
+                "onset_days": 2,
+                "age_group": "adult",
+                "location": {"state": "Delhi", "district": "New Delhi"},
+                "idsp_flags": ["fever_cluster_watch"],
+                "icd10_codes": ["R50"],
+            }
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["record_id"].startswith("rec_")
+    assert payload["record"]["location"]["state"] == "Delhi"
+
+
 def test_records_alerts_and_stats_endpoints() -> None:
     ingest_response = client.post(
         "/pipeline/ingest",
@@ -141,3 +188,29 @@ def test_records_alerts_and_stats_endpoints() -> None:
 def test_get_record_not_found() -> None:
     response = client.get("/records/rec_non_existent")
     assert response.status_code == 404
+
+
+def test_supabase_health_without_configuration() -> None:
+    response = client.get("/supabase/health")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["enabled"] is False
+    assert payload["ok"] is False
+
+
+def test_supabase_records_returns_error_without_configuration() -> None:
+    response = client.get("/supabase/records")
+    assert response.status_code == 503
+
+
+def test_railway_health_without_configuration() -> None:
+    response = client.get("/railway/health")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["enabled"] is False
+    assert payload["ok"] is False
+
+
+def test_railway_records_returns_error_without_configuration() -> None:
+    response = client.get("/railway/records")
+    assert response.status_code == 503
